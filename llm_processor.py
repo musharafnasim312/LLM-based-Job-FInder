@@ -61,15 +61,16 @@ Job Listings:
 {jobs_block}
 
 Instructions:
-1. Carefully review each job listing against all aspects of the user's search criteria (position, experience, skills, location, salary, description).
-2. Identify only the jobs that are a strong and direct match to the provided criteria.
-3. Return your response STRICTLY as a single JSON object.
-4. This JSON object must have one top-level key: "relevant_jobs".
-5. The value of "relevant_jobs" must be a JSON list of job objects.
-6. Each job object in this list must be identical in structure to the input job objects (i.e., include all original fields like "job_title", "company", "location", "salary", "apply_link", "description", "source", and any others present in the input).
-7. If a job has a 'description' and 'skills_extracted', pay close attention to them for matching against user's 'position' and 'skills'.
-8. If no jobs are a strong match, the "relevant_jobs" list should be empty ([]).
-9. Do NOT include any explanations, apologies, or introductory text outside of the JSON object. The entire response should be only the JSON object.
+1. Carefully review each job listing against all aspects of the user's search criteria. When matching the user's 'position' or keyword-based criteria, consider both the job_title and the job_description for relevance.
+2. Identify only the jobs that are a strong and direct match to ALL provided criteria.
+3. If the user provides a 'description' in their search criteria, ensure the job's 'description' aligns well with it.
+4. Pay very close attention to the job's 'description' and any 'skills_extracted' when matching against the user's 'position' and 'skills' criteria. The relevance to the job description is highly important.
+5. Return your response STRICTLY as a single JSON object.
+6. This JSON object must have one top-level key: "relevant_jobs".
+7. The value of "relevant_jobs" must be a JSON list of job objects.
+8. Each job object in this list must be identical in structure to the input job objects (i.e., include all original fields like "job_title", "company", "location", "salary", "apply_link", "description", "source", and any others present in the input).
+9. If no jobs are a strong match, the "relevant_jobs" list should be empty ([]).
+10. Do NOT include any explanations, apologies, or introductory text outside of the JSON object. The entire response should be only the JSON object.
 
 Example of expected JSON output format:
 {{

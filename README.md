@@ -85,8 +85,15 @@ This API scrapes job listings and allows users to search for jobs based on speci
         }
         ```
 2.  **Loading Data**: The `/search` endpoint loads job data from `jobs_data.json`.
-3.  **LLM Filtering**: When a user sends a search query to the `/search` endpoint, the criteria are passed along with the loaded job data to the `llm_processor.py`. This module constructs a prompt for the Google Gemini API, asking it to identify jobs that are a "strong match" to the user's criteria.
-4.  **Response**: The API returns a JSON list of the jobs deemed relevant by the LLM.
+3.  **LLM Filtering for Enhanced Relevancy**: When a user sends a search query to the `/search` endpoint, the criteria are passed along with the loaded job data to the `llm_processor.py`. This module constructs a detailed prompt for the Google Gemini API. The prompt instructs the LLM to:
+    *   Act as an expert job matching assistant.
+    *   Carefully review each job listing against all aspects of the user's search criteria.
+    *   **Crucially, when matching the user's 'position' or keyword-based criteria, consider both the `job_title` and the full `job_description` for relevance.**
+    *   If the user provides a `description` in their search criteria, ensure the job's `description` aligns well with it.
+    *   Pay very close attention to the job's `description` and any `skills_extracted` when matching against the user's `position` and `skills` criteria, as relevance to the job description is highly important.
+    *   Identify only the jobs that are a strong and direct match to ALL provided criteria.
+    *   Return the results strictly as a JSON object with a `relevant_jobs` key.
+4.  **Response**: The API returns a JSON list of the jobs deemed relevant by the LLM, with improved accuracy thanks to the detailed analysis of job descriptions.
 
 ## API Endpoints
 
@@ -114,7 +121,9 @@ This API scrapes job listings and allows users to search for jobs based on speci
 *   **`llm_processor.py`**: 
     *   Initializes the Google Gemini client using the `GOOGLE_API_KEY` from the `.env` file.
     *   The `filter_jobs_with_llm` function takes the list of all jobs and the user's search criteria.
-    *   It constructs a detailed prompt instructing the Gemini model (`gemini-1.5-flash` by default) to act as a job matching assistant and return only strongly matching jobs in a specific JSON format (`{"relevant_jobs": [...]}`).
+    *   It constructs a detailed prompt instructing the Gemini model (`gemini-1.5-flash` by default) to act as a job matching assistant. 
+    *   **The prompt has been specifically enhanced to ensure the LLM thoroughly analyzes job descriptions for relevance. It instructs the model to consider both the `job_title` and `job_description` when matching against the user's 'position' or keywords. It also directs the LLM to ensure alignment if the user includes a 'description' in their search and to give high importance to the job's description content when matching skills and position details.**
+    *   It asks the model to return only strongly matching jobs in a specific JSON format (`{"relevant_jobs": [...]}`).
     *   It makes an API call to Gemini, requesting a JSON response using `response_mime_type="application/json"`.
     *   Parses the LLM's response and returns the list of relevant jobs.
 *   **`scraper.py`**: Contains functions to simulate scraping (`run_scrapers`) and load data from `jobs_data.json` (`load_scraped_data`). The actual scraping logic is illustrative and would need to be fully implemented for real-world use.
