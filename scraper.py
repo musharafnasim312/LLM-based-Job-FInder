@@ -146,79 +146,192 @@ def scrape_indeed(position, location, max_pages=1):
     return jobs
 
 def scrape_linkedin(position, location, max_pages=1):
-    """Scrapes job listings from LinkedIn."""
+    """Scrapes job listings from LinkedIn, including detailed descriptions."""
     print(f"Scraping LinkedIn for '{position}' in '{location}'...")
     jobs = []
-    driver = get_driver(headless=False) # Run non-headless for LinkedIn
+    # Run non-headless to observe behavior, especially for debugging selectors
+    driver = get_driver(headless=False) 
     if not driver:
-        return jobs # WebDriver initialization failed
+        print("WebDriver initialization failed for LinkedIn.")
+        return jobs
 
-    base_url = "https://www.linkedin.com/jobs/search/?keywords={}&location={}&f_TPR=&sortBy=R&position=1&pageNum={}" 
+    base_url = "https://www.linkedin.com/jobs/search/?keywords={}&location={}&f_TPR=&sortBy=R&position=1&pageNum={}"
     
     try:
-        for page_num in range(max_pages): # LinkedIn uses pageNum starting from 0 in URL
-            url = base_url.format(position.replace(' ', '%20'), location.replace(' ', '%20'), page_num)
-            print(f"Navigating to LinkedIn page {page_num+1}: {url}")
-            driver.get(url)
-            time.sleep(5) # LinkedIn can be slower and has more dynamic content
+        for page_num in range(max_pages):
+            current_page_url = base_url.format(position.replace(' ', '%20'), location.replace(' ', '%20'), page_num)
+            print(f"Navigating to LinkedIn page {page_num + 1}: {current_page_url}")
+            driver.get(current_page_url)
+            time.sleep(5) # Allow time for page to load, ads, pop-ups
 
-            # Scroll to load more jobs if necessary (LinkedIn often uses infinite scroll)
+            # Scroll to load more jobs
             print("Scrolling to load more LinkedIn jobs...")
             last_height = driver.execute_script("return document.body.scrollHeight")
-            for i in range(3): # Scroll a few times to try and load more jobs
+            for i in range(3): # Scroll a few times
                 driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
                 time.sleep(2.5) # Wait for new jobs to load
                 new_height = driver.execute_script("return document.body.scrollHeight")
-                print(f"Scroll attempt {i+1}: new_height={new_height}, last_height={last_height}")
-                if new_height == last_height and i > 0: # Break if height doesn't change after first scroll
+                if new_height == last_height and i > 0:
                     print("No new content loaded by scrolling.")
                     break
                 last_height = new_height
 
-            # CSS Selectors for LinkedIn - these are also subject to change.
-            cards = driver.find_elements(By.CSS_SELECTOR, 'div.base-card--link') # More specific card selector
-            print(f"Found {len(cards)} job cards on LinkedIn page {page_num+1}")
+            # Find job cards on the page
+            # It's better to target the clickable element that opens the detail view.
+            # This selector targets the 'li' element which is usually the container for each job posting.
+            job_list_items = driver.find_elements(By.CSS_SELECTOR, 'ul.jobs-search__results-list > li')
+            print(f"Found {len(job_list_items)} potential job items on LinkedIn page {page_num + 1}")
 
-            if not cards and page_num == 0: # Check for sign-in overlay on first page
+            if not job_list_items and page_num == 0:
+                if "linkedin.com/login" in driver.current_url or "linkedin.com/authwall" in driver.current_url:
+                    print("LinkedIn redirected to login/authwall. Cannot scrape without login.")
+                    break 
+                # You might add more checks for other overlays or unexpected page states here
+
+            for index, job_item_container in enumerate(job_list_items):
+                print(f"Processing job item {index + 1}/{len(job_list_items)}...")
+                title, company, loc, card_apply_link, card_salary = "Not found", "Not found", "Not found", "Check link", "Check link"
+                
+                # Extract basic info from the card first (as a fallback or for initial identification)
                 try:
-                    print("No job cards found, checking for LinkedIn sign-in overlay...")
-                    # LinkedIn might show a sign-in prompt that covers jobs
-                    # This is a guess, actual element might differ
-                    if "linkedin.com/login" in driver.current_url or "linkedin.com/authwall" in driver.current_url:
-                         print("LinkedIn redirected to login/authwall. Cannot scrape without login.")
-                         break # Stop trying this site if login is required
-                    # Add more checks if needed for other types of overlays
-                except Exception as e_overlay:
-                    print(f"Could not check for LinkedIn overlay: {e_overlay}")
-
-
-            for card in cards:
+                    title_element = job_item_container.find_element(By.CSS_SELECTOR, 'h3.base-search-card__title')
+                    title = title_element.text.strip()
+                except: pass
                 try:
-                    title = card.find_element(By.CSS_SELECTOR, 'h3.base-search-card__title').text.strip()
-                    # Ensure the company link is correctly identified.
-                    company_element = card.find_element(By.CSS_SELECTOR, 'h4.base-search-card__subtitle a.hidden-nested-link')
+                    company_element = job_item_container.find_element(By.CSS_SELECTOR, 'h4.base-search-card__subtitle a')
                     company = company_element.text.strip()
-                    loc = card.find_element(By.CSS_SELECTOR, 'span.job-search-card__location').text.strip()
-                    link = card.find_element(By.CSS_SELECTOR, 'a.base-card__full-link').get_attribute('href')
+                except: pass
+                try:
+                    loc_element = job_item_container.find_element(By.CSS_SELECTOR, 'span.job-search-card__location')
+                    loc = loc_element.text.strip()
+                except: pass
+                try: # Link from the card itself
+                    link_el = job_item_container.find_element(By.CSS_SELECTOR, 'a.base-card__full-link')
+                    card_apply_link = link_el.get_attribute('href')
+                except: pass
+                try: # Salary from the card if present
+                    salary_el = job_item_container.find_element(By.CSS_SELECTOR, 'span.job-search-card__salary-info')
+                    card_salary = salary_el.text.strip()
+                except: pass
+
+                print(f"  Card details: Title: {title}, Company: {company}")
+
+                description = "Check link" # Default description
+                final_apply_link = card_apply_link # Use card link as default
+                final_salary = card_salary if card_salary and card_salary != "Check link" else "Check link"
+
+                try:
+                    # Click the job card (or a specific clickable element within it) to load details
+                    # It's often the main 'div' or 'a' tag that represents the card.
+                    # Using job_item_container directly if it's the 'li' and clickable.
+                    # Sometimes a more specific child element is better to click.
+                    clickable_card_element = job_item_container.find_element(By.CSS_SELECTOR, 'div.base-card--link') # Or 'a.base-card__full-link'
+                    print(f"  Attempting to click job card for: {title}")
+                    driver.execute_script("arguments[0].scrollIntoView(true);", clickable_card_element) # Scroll into view
+                    time.sleep(0.5) # Brief pause before click
+                    clickable_card_element.click()
+                    print("  Card clicked. Waiting for details to load...")
+                    time.sleep(4) # INCREASED WAIT for details pane to load reliably
+
+                    # --- Extract from details pane ---
+                    # Description (try a few common selectors for LinkedIn)
+                    # The main description container is often 'div.jobs-description__content' or similar
+                    desc_selectors = [
+                        'div.description__text--rich section.jobs-description', # Newer UI often nests it
+                        'div.jobs-description__content div.show-more-less-html__markup', # Very common
+                        'section.jobs-description .show-more-less-html__markup',
+                        'div.description__text',
+                        '#job-details' # A general container for job details
+                    ]
+                    extracted_desc_text = "Check link"
+                    for selector in desc_selectors:
+                        try:
+                            # Wait for the description element to be present in the DOM of the details pane
+                            description_element = driver.find_element(By.CSS_SELECTOR, selector)
+                            # Use .get_attribute('innerText') or .text.strip()
+                            # innerText can be better for preserving line breaks if needed, but .text is simpler.
+                            extracted_desc_text = description_element.text.strip()
+                            if extracted_desc_text and extracted_desc_text.lower() != "check link" and len(extracted_desc_text) > 50: # Basic check for actual content
+                                print(f"  Successfully extracted description (len: {len(extracted_desc_text)}) using selector: {selector}")
+                                break 
+                        except Exception as e_desc_sel:
+                            # print(f"  Description selector {selector} not found or failed: {e_desc_sel}")
+                            pass # Silently try next selector
                     
-                    # LinkedIn salary and detailed description are often not on the search results page directly
-                    # or require clicking into the job. This basic scraper focuses on search results.
-                    jobs.append({
-                        'job_title': title,
-                        'company': company,
-                        'location': loc,
-                        'salary': 'Check link', # Placeholder
-                        'description': 'Check link', # Placeholder
-                        'apply_link': link,
-                        'source': 'linkedin'
-                    })
-                except Exception as e:
-                    print(f"Error extracting details from a LinkedIn job card: {e} - Card HTML: {card.get_attribute('outerHTML')[:200]}") # Print part of card HTML for debugging
+                    description = extracted_desc_text if extracted_desc_text != "Check link" else "Could not extract detailed description."
+
+                    # Salary from details pane (often less reliable than card or not present)
+                    # This part is highly prone to change.
+                    salary_detail_selectors = [
+                        'div.job-details-jobs-unified-top-card__job-insight span.tvm__text', # Example
+                        'span.jobs-unified-top-card__salary-info', 
+                        'li.job-details-jobs-unified-top-card__job-insight:nth-of-type(1) > span' # More specific
+                    ]
+                    extracted_salary_detail = "Check link"
+                    for selector in salary_detail_selectors:
+                        try:
+                            salary_elements = driver.find_elements(By.CSS_SELECTOR, selector)
+                            for el in salary_elements:
+                                if el.text and any(char.isdigit() for char in el.text): # Look for digits
+                                    extracted_salary_detail = el.text.strip()
+                                    print(f"  Extracted salary from details: '{extracted_salary_detail}' using {selector}")
+                                    break
+                            if extracted_salary_detail != "Check link":
+                                break
+                        except:
+                            pass
+                    
+                    if extracted_salary_detail != "Check link":
+                        final_salary = extracted_salary_detail
+                    elif card_salary and card_salary != "Check link":
+                        final_salary = card_salary # Fallback to card salary
+                        print(f"  Used salary from card: {final_salary}")
+                    else:
+                        print("  No salary info found on card or in details.")
+                        final_salary = "Check link" # Default if nothing found
+
+                    # Try to get a more direct apply link from the details pane if available
+                    try:
+                        apply_button_details_pane = driver.find_element(By.CSS_SELECTOR, 'div.jobs-apply-button--top-card button.jobs-apply-button')
+                        # This usually triggers an "Easy Apply" or takes to next step.
+                        # Getting the direct external link can be harder.
+                        # For now, we note its presence or can try to get its text.
+                        if apply_button_details_pane.is_displayed():
+                             print("  'Apply' button found in details pane.")
+                        # If it's an <a> tag with href, get it:
+                        # apply_link_details = apply_button_details_pane.get_attribute('href')
+                        # if apply_link_details: final_apply_link = apply_link_details
+                    except:
+                        pass # Keep card_apply_link if not found here
+
+                except Exception as e_click_detail:
+                    print(f"  Error clicking card or extracting details for '{title}': {e_click_detail}")
+                    # If clicking fails, description remains "Check link" or previous value.
+                
+                # Ensure all fields are strings
+                job_details = {
+                    'job_title': str(title),
+                    'company': str(company),
+                    'location': str(loc),
+                    'salary': str(final_salary),
+                    'description': str(description),
+                    'apply_link': str(final_apply_link),
+                    'source': 'linkedin'
+                }
+                jobs.append(job_details)
+                print(f"  Processed: '{title}' - Desc len: {len(str(description)) if description else 0} - Salary: '{final_salary}'")
+                # Brief pause before processing next card to avoid overwhelming LinkedIn or rapid state changes
+                time.sleep(0.5) 
+
+            if page_num < max_pages - 1:
+                print("Waiting before loading next LinkedIn page...")
+                time.sleep(3)
+
     except Exception as e_outer:
         print(f"An error occurred during the LinkedIn scraping process: {e_outer}")
     finally:
         if driver:
-            print("Finished scraping LinkedIn. WebDriver for LinkedIn will close, browser window might remain open.")
+            print("Finished scraping LinkedIn. WebDriver for LinkedIn will close, browser window might remain open if detach=True.")
             driver.quit()
     return jobs
 
